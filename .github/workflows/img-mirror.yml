@@ -1,0 +1,94 @@
+name: img-mirror
+# 当新建或者修改 issues 时，触发当前 workflow
+on:
+  issues:
+    types: [opened, edited]
+jobs:
+  # 镜像转换任务
+  mirror_transition:
+    # 运行环境
+    runs-on: ubuntu-latest
+    # 运行条件 => issues 的 label 包含 img-mirror
+    if: contains(github.event.issue.labels.*.name, 'img-mirror')
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4 # 使用python装配器
+        with:
+          python-version: '3.10' # 指定python版本
+      - name: requirements
+        run: |
+          python -m pip install --upgrade pip
+          pip3 install -r requirements.txt
+      - run: python3 ./main.py
+      # 当成功输出 output.json 文件时，为 issues 添加评论
+      - name: Add comment
+        if: ${{ hashFiles('output.json') }}
+        uses: actions/github-script@v5
+        with:
+          script: |
+            const fs = require('fs');
+            const jsonData = fs.readFileSync('output.json', 'utf8');
+            const data = JSON.parse(jsonData);
+            const body = "Hello，失败镜像数量为: "+ data.err_num + " 失败镜像如下：\n" +
+            "```shell\n" +
+            data.err_list.join('\n') +
+            "\n" +
+            "```\n" +
+            "您可以直接执行该命令：\n" +
+              "\n" +
+              "```shell\n" +
+              "echo -e '" + data.performed + "' | bash\n" +
+              "\n" +
+              "```\n" +
+              "或是手动执行：\n" +
+              "\n" +
+              "```shell\n" +
+              data.performed_manually.join('\n') +
+              "\n" +
+              "```\n" +
+              "\n" +
+              "希望可以帮助到您，祝您周" + "日一二三四五六".charAt(new Date().getDay()) + "愉快！";
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            })
+      # 当以上步骤成功时，为 issues 添加 success 标签
+      - name: Success issues
+        if: ${{ success() }}
+        uses: actions/github-script@v5
+        with:
+          script: |
+            github.rest.issues.addLabels({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ['success']
+            })
+      # 当以上步骤失败时，为 issues 添加 failure 标签，并为其添加失败原因评论
+      - name: Failure issues
+        if: ${{ failure() }}
+        uses: actions/github-script@v5
+        with:
+          script: |
+            github.rest.issues.addLabels({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ['failure']
+            })
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: "[构建失败，点击查看](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            })
+env: 
+  # 设置secrets的环境变量
+  USERNAME: ${{ secrets.USERNAME }}
+  PASSWORD: ${{ secrets.PASSWORD }}
+  REGISTRY: ${{ secrets.REGISTRY }}
+  REPOSITORY: ${{ secrets.REPOSITORY }}
+  IMG_MIRROR: ${{ github.event.issue.body }}
